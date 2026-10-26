@@ -258,8 +258,7 @@ class Entry:
         n = len(draft.lines) - 1
         while True:
             draft.show()
-            choice = ask(f"Entrée : valider · 1-{n} : changer le compte · m : montant · "
-                         "r : répartition · a : abandonner").casefold()
+            choice = ask(f"Entrée valide · 1-{n} compte · m montant · r répartition · a abandon").casefold()
             if not choice:
                 return draft
             if choice == "a":
