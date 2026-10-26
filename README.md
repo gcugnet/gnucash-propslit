@@ -23,6 +23,16 @@ nix build                 # ./result/bin/gnc-propsplit
 nix develop -c pytest     # tests
 ```
 
+Le CLI doit charger le livre avec **le même GnuCash que l'interface**. Celui du
+poste ajoute des cryptomonnaies comme devises (`nix/crypto-currencies.patch`,
+copie de l'overlay NixOS) ; le flake applique ce patch sur la même révision de
+nixpkgs que la configuration système. Après une mise à jour du système, il faut
+reporter la révision de `nixpkgs` dans `flake.nix`, sinon GnuCash sera recompilé
+dans une autre version.
+
+Garde-fou : si le moteur signale la moindre erreur au chargement, le CLI refuse
+d'aller plus loin et indique le journal à consulter.
+
 ## Utilisation
 
 ```sh
