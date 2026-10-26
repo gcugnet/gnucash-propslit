@@ -141,9 +141,10 @@ class Ledger:
         """Dernière transaction du compte portant ce libellé, comme le registre."""
         return account.FindTransByDesc(description)
 
-    def last_transaction(self, account) -> Transaction | None:
-        splits = account.GetSplitList()
-        return splits[-1].GetParent() if splits else None
+    def recent_transactions(self, account) -> Iterator[Transaction]:
+        """Transactions du compte, de la plus récente à la plus ancienne."""
+        for split in reversed(account.GetSplitList()):
+            yield split.GetParent()
 
     def template(self, trans, account) -> Template:
         """Décompose une transaction existante en répartitions entières.
