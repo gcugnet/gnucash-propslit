@@ -4,7 +4,7 @@ import pytest
 
 from propsplit import split_math
 from propsplit.book import BookError, BookLockedError, UnsupportedTransaction, guid_of, open_book
-from sample_book import COMMUN, COMPAGNE, COURSES, DOLLARS, LOISIRS, make_book
+from sample_book import COMMUN, COMPAGNE, COURSES, DOLLARS, LOISIRS, break_currency, make_book
 
 
 @pytest.fixture
@@ -109,3 +109,15 @@ def test_missing_book(tmp_path):
     with pytest.raises(BookError, match="introuvable"):
         with open_book(tmp_path / "absent.gnucash"):
             pass
+
+
+@pytest.mark.parametrize("readonly", [True, False])
+def test_book_with_unknown_currency_is_refused(book_path, readonly):
+    break_currency(book_path)
+    before = book_path.read_bytes()
+    with pytest.raises(BookError, match="pas chargé proprement"):
+        with open_book(book_path, readonly=readonly):
+            pass
+    assert book_path.read_bytes() == before
+    # Le verrou a bien été relâché.
+    assert not list(book_path.parent.glob("*.LCK"))

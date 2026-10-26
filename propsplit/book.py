@@ -5,7 +5,12 @@ registre de GnuCash lors d'une auto-complétion (`gnc_copy_trans_onto_trans`),
 à la répartition des montants près.
 """
 
+import ctypes
 import datetime
+import os
+import re
+import sys
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from fractions import Fraction
@@ -17,6 +22,11 @@ from gnucash import gnucash_core_c as gc
 from gnucash.gnucash_core import GnuCashBackendException
 
 SEPARATOR = ":"
+
+# Lignes du journal du moteur qui signalent un chargement incomplet ou faussé.
+# Le backend XML peut abandonner la lecture (« Syntax error ») sans que la
+# session ne remonte d'erreur : seul le journal en garde la trace.
+_LOAD_FAILURE = re.compile(r"\b(ERROR|CRIT)\b|Syntax error")
 
 
 class BookError(Exception):
@@ -76,6 +86,53 @@ def _uri(path: Path) -> str:
 
 
 @contextmanager
+def _capture_engine_output() -> Iterator[Path]:
+    """Redirige vers un fichier ce que le moteur écrit sur stdout et stderr.
+
+    La redirection se fait au niveau des descripteurs, puisque les messages
+    viennent du code C.
+    """
+    log = tempfile.NamedTemporaryFile(prefix="gnc-propsplit-", suffix=".log", delete=False)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    saved = os.dup(1), os.dup(2)
+    try:
+        os.dup2(log.fileno(), 1)
+        os.dup2(log.fileno(), 2)
+        yield Path(log.name)
+    finally:
+        ctypes.CDLL(None).fflush(None)
+        os.dup2(saved[0], 1)
+        os.dup2(saved[1], 2)
+        for fd in saved:
+            os.close(fd)
+        log.close()
+
+
+def _check_load(session, path: Path, log: Path) -> None:
+    """Refuse un livre que le moteur n'a pas chargé proprement.
+
+    Écrire un tel livre perdrait tout ce que le moteur n'a pas su lire, par
+    exemple des devises absentes de ce GnuCash et les comptes qui les utilisent.
+    """
+    problems = [line for line in log.read_text(errors="replace").splitlines() if _LOAD_FAILURE.search(line)]
+    root = session.book.get_root_account()
+    problems += [
+        f"compte sans commodité : {a.get_full_name()}"
+        for a in root.get_descendants()
+        if a.GetCommodity() is None
+    ]
+    if problems:
+        raise BookError(
+            f"GnuCash n'a pas chargé proprement {path} ; rien ne sera lu ni écrit.\n"
+            f"Premier problème : {problems[0].strip()}\n"
+            f"Journal complet : {log}\n"
+            "Cause probable : ce GnuCash n'est pas celui de l'interface (devises "
+            "personnalisées manquantes, par exemple). Utilisez le binaire du flake."
+        )
+
+
+@contextmanager
 def open_book(path: str | Path, readonly: bool = False) -> Iterator["Ledger"]:
     """Ouvre le livre et le referme quoi qu'il arrive.
 
@@ -88,16 +145,19 @@ def open_book(path: str | Path, readonly: bool = False) -> Iterator["Ledger"]:
         raise BookError(f"livre introuvable : {path}")
     gc.gnc_set_account_separator(SEPARATOR)
     mode = SessionOpenMode.SESSION_READ_ONLY if readonly else SessionOpenMode.SESSION_NORMAL_OPEN
+    with _capture_engine_output() as log:
+        try:
+            session = Session(_uri(path), mode)
+        except GnuCashBackendException as e:
+            if gc.ERR_BACKEND_LOCKED in e.errors:
+                raise BookLockedError(
+                    f"le livre est verrouillé, sans doute ouvert dans GnuCash : {path}\n"
+                    "Fermez-le dans GnuCash puis relancez."
+                ) from e
+            raise BookError(f"ouverture impossible de {path} : {e}\nJournal : {log}") from e
     try:
-        session = Session(_uri(path), mode)
-    except GnuCashBackendException as e:
-        if gc.ERR_BACKEND_LOCKED in e.errors:
-            raise BookLockedError(
-                f"le livre est verrouillé, sans doute ouvert dans GnuCash : {path}\n"
-                "Fermez-le dans GnuCash puis relancez."
-            ) from e
-        raise BookError(f"ouverture impossible de {path} : {e}") from e
-    try:
+        _check_load(session, path, log)
+        log.unlink()
         yield Ledger(session, path, readonly)
     finally:
         session.end()

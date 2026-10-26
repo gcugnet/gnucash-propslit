@@ -65,3 +65,13 @@ def make_book(path):
     session.save()
     session.end()
     return path
+
+
+def break_currency(path, code="USD"):
+    """Simule un livre utilisant une devise inconnue de ce GnuCash."""
+    import gzip
+
+    xml = gzip.decompress(path.read_bytes())
+    xml = xml.replace(f"<cmdty:id>{code}</cmdty:id>".encode(), b"<cmdty:id>ZZZ</cmdty:id>")
+    path.write_bytes(gzip.compress(xml))
+    return path
