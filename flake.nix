@@ -1,14 +1,23 @@
 {
   description = "gnc-propsplit : saisie GnuCash avec auto-complétion proportionnelle";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+  # Même révision que la configuration NixOS du poste : le GnuCash ci-dessous
+  # est alors identique à celui de l'interface graphique (et déjà compilé).
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/da6dc0e7b26060f2f71ce3ef7088fb56ee44fa36";
 
   outputs =
     { self, nixpkgs }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
-      inherit (pkgs) gnucash;
+      # Le livre utilise des cryptomonnaies déclarées comme devises : sans ce
+      # patch (le même que dans /config/Nix/common/overlay.nix), le moteur les
+      # rejette au chargement et détache les comptes concernés de leur
+      # commodité. Le CLI doit charger le livre exactement comme l'interface.
+      gnucash = pkgs.gnucash.overrideAttrs (attrs: {
+        patches = attrs.patches ++ [ ./nix/crypto-currencies.patch ];
+        doCheck = false;
+      });
       # Les bindings sont compilés pour le Python de nixpkgs : il faut le même.
       python = pkgs.python3;
       gnucashSitePackages = "${gnucash}/${python.sitePackages}";
